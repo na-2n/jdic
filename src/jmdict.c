@@ -408,17 +408,6 @@ int jmdict_import(jdic_t *p, const char *fn)
         .verbose = p->verbose,
         .parser = parser,
         .db = p->db,
-        .depth = 0,
-        .count = 0,
-        .seqnum = 0,
-        .kanji_id = 0,
-        .reading_id = 0,
-        .sense_id = 0,
-        .cur_tag = NULL,
-        .cur_atts = NULL,
-        .cur_val = NULL,
-        .cur_val_len = 0,
-        .cur_val_alen = 0,
     };
     int done = 0;
     int ret = 0;

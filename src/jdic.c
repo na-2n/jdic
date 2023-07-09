@@ -10,6 +10,13 @@
 #include "jdic.h"
 #include "jmdict.h"
 
+typedef enum {
+    SEARCH_AUTO = 0,
+    SEARCH_KANJI,
+    SEARCH_READING,
+    SEARCH_BOTH,
+} search_mode_t;
+
 static void usage(const char *);
 
 int main(int argc, char **argv)
@@ -23,6 +30,7 @@ int main(int argc, char **argv)
         .limit = 5,
         .page = 1,
     };
+    search_mode_t search_mode = SEARCH_AUTO;
 
     if (argc == 1) {
         usage(argv[0]);
@@ -30,10 +38,16 @@ int main(int argc, char **argv)
     }
 
     char c;
-    while ((c = (char)getopt(argc, argv, ":hvd:i:m:p:")) != -1) {
+    while ((c = (char)getopt(argc, argv, ":hvkrd:i:m:p:")) != -1) {
         switch (c) {
             case 'v':
                 p.verbose++;
+                break;
+            case 'k':
+                search_mode = SEARCH_KANJI;
+                break;
+            case 'r':
+                search_mode = SEARCH_READING;
                 break;
             case 'd':
                 dflag = 1;
@@ -110,12 +124,36 @@ int main(int argc, char **argv)
     printf("Searching for \"%s\"...\n", arg);
 
     int *seqnums = calloc((size_t)p.limit, sizeof(int));
-    int count = jmdict_search_kanji(&p, arg, seqnums);
-    if (count == 0) {
-        if (p.verbose) {
-            printf("No kanji results, trying reading...\n");
+    int count = -1;
+    if (search_mode == SEARCH_AUTO) {
+        count = jmdict_search_kanji(&p, arg, seqnums);
+        if (count <= 0) {
+            if (p.verbose) {
+                fprintf(stderr, "No kanji results, trying reading...\n");
+            }
+            count = jmdict_search_reading(&p, arg, seqnums);
         }
+
+        if (count <= 0) {
+            if (p.verbose) {
+                fprintf(stderr, "No reading results found either! aborting...\n");
+            }
+            fprintf(stderr, "No results found...\n");
+        }
+    } else if (search_mode == SEARCH_KANJI) {
+        count = jmdict_search_kanji(&p, arg, seqnums);
+        if (count <= 0) {
+            fprintf(stderr, "No kanji results found...\n");
+
+            goto cleanup;
+        }
+    } else if (search_mode == SEARCH_READING) {
         count = jmdict_search_reading(&p, arg, seqnums);
+        if (count <= 0) {
+            fprintf(stderr, "No reading results found...\n");
+
+            goto cleanup;
+        }
     }
 
     if (count > 0) {
@@ -125,6 +163,7 @@ int main(int argc, char **argv)
         }
     }
 
+cleanup:
     free(seqnums);
     free(arg);
     return ret;
@@ -132,12 +171,17 @@ int main(int argc, char **argv)
 
 void usage(const char *fn)
 {
-    printf("usage: %s <query>\n", fn);
-    printf("\t-h\t\tDisplay this message\n");
-    printf("\t-v\t\tEnable verbose output\n");
-    printf("\t-d <db.sqlite>\tUse specified database\n");
-    printf("\t-i <file>\tImport dictionary file\n");
-    printf("\t-m <max>\tMaximum number of entries to display, defaults to 4\n");
-    printf("\t-p <page>\tPage number to display\n");
+    printf(
+            "usage: %s <query>\n"
+            "\t-h\t\tDisplay this message\n"
+            "\t-v\t\tEnable verbose output\n"
+            "\t-k\t\tSearch kanji\n"
+            "\t-r\t\tSearch reading (kana)\n"
+            "\t-d <db.sqlite>\tUse specified database\n"
+            "\t-i <file>\tImport dictionary file\n"
+            "\t-m <max>\tMaximum number of entries to display, defaults to 4\n"
+            "\t-p <page>\tPage number to display\n",
+            fn
+    );
 }
 
