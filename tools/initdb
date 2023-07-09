@@ -1,0 +1,7 @@
+#!/bin/sh
+SCH=$1
+FN=$2
+[ -z $SCH ] && SCH=schema.sql
+[ -z $FN ] && FN=db.sqlite3
+[ -e $FN ] && rm $FN
+touch $FN && sqlite3 $FN < $SCH && echo "Applied schema '$SCH' to database '$FN'"

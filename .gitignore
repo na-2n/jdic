@@ -1,0 +1,7 @@
+*build*/
+_*/
+compile_commands.json
+*.core
+*.sqlite3
+*.xml
+
