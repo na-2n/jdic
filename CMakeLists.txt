@@ -6,6 +6,7 @@ find_package(SQLite3 REQUIRED)
 
 set(JDIC_SOURCE
     ./src/jdic.c
+    ./src/array.c
     ./src/util.c
     ./src/jmdict.c
 )

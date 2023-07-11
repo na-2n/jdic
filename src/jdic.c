@@ -6,6 +6,8 @@
 #include <ctype.h>
 #include <unistd.h>
 
+#include <time.h>
+
 #include <sqlite3.h>
 
 #include "jdic.h"
@@ -174,6 +176,8 @@ int main(int argc, char **argv)
     }
 
 cleanup:
+    sqlite3_close(p.db);
+
     free(seqnums);
     free(arg);
     return ret;
@@ -184,12 +188,6 @@ typedef struct {
     char lang[4];
     char type[5];
     char *text;
-} glossary_t;
-
-typedef struct {
-    int id;
-    int ngloss;
-    glossary_t *gloss;
 } definition_t;
 
 typedef struct {
@@ -223,20 +221,7 @@ int ra_check(kanji_t *k, int size)
     return 0;
 }
 
-char * mydup(const char *str)
-{
-    char *x = malloc(strlen(str) + 1);
-
-    for (int i = 0; *str; str++ && i++)
-    {
-        x[i] = *str;
-        putchar(*str);
-    }
-    putchar('\n');
-
-    return x;
-}
-
+// TODO swap count queries for dynamic arrays
 void print_kanji_info(jdic_t *p, int seqnum)
 {
     struct sqlite3_stmt *st = NULL;
@@ -248,6 +233,8 @@ void print_kanji_info(jdic_t *p, int seqnum)
     if (p->verbose >= 2) {
         printf("[%i] ", seqnum);
     }
+
+    time_t then = time(0);
 
     {
         const char *sql = "SELECT count(*) FROM jmdict_kanji WHERE seqnum = ?";
@@ -269,6 +256,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
 
     kanji = calloc((size_t)nkanji, sizeof(kanji_t));
 
+    // TODO combine with reading for query
     if (nkanji > 0) {
         const char *sql = "SELECT id, text FROM jmdict_kanji WHERE seqnum = ?";
         sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
@@ -327,6 +315,11 @@ void print_kanji_info(jdic_t *p, int seqnum)
 
         sqlite3_finalize(st);
         st = NULL;
+    }
+
+    if (p->verbose >= 2) {
+        printf("ktime = %lu\n", time(0) - then);
+        then = time(0);
     }
 
     {
@@ -416,16 +409,27 @@ void print_kanji_info(jdic_t *p, int seqnum)
         st = NULL;
     }
 
+
+    if (p->verbose >= 2) {
+        printf("rtime = %lu\n", time(0) - then);
+        then = time(0);
+    }
+
     {
-        const char *sql = "SELECT count(*) FROM jmdict_sense WHERE seqnum = ?";
+        const char *sql =
+            "SELECT count(*) FROM jmdict_sense "
+            "LEFT JOIN jmdict_sense_gloss "
+            "ON jmdict_sense_gloss.sense = jmdict_sense.id "
+            "WHERE jmdict_sense.seqnum = ? AND jmdict_sense_gloss.lang = ?";
         sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
         sqlite3_bind_int(st, 1, seqnum);
+        sqlite3_bind_text(st, 2, p->lang, 3, SQLITE_TRANSIENT);
 
         int ec = sqlite3_step(st);
         if (ec == SQLITE_ROW) {
             ndefs = sqlite3_column_int(st, 0);
         } else {
-            fprintf(stderr, "ERR! Failed to get sense count\n");
+            fprintf(stderr, "ERR! Failed to get sense count: %i\n", ec);
         }
 
         sqlite3_finalize(st);
@@ -434,74 +438,37 @@ void print_kanji_info(jdic_t *p, int seqnum)
 
     defs = calloc((size_t)ndefs, sizeof(definition_t));
 
-    if (ndefs > 0) {
-        int count = 0;
-        const char *sql = "SELECT id FROM jmdict_sense WHERE seqnum = ?";
+    {
+        const char *sql =
+            "SELECT jmdict_sense.id, jmdict_sense_gloss.type, jmdict_sense_gloss.text "
+            "FROM jmdict_sense "
+            "LEFT JOIN jmdict_sense_gloss ON jmdict_sense_gloss.sense = jmdict_sense.id "
+            "WHERE jmdict_sense.seqnum = ? AND jmdict_sense_gloss.lang = ?";
         sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
         sqlite3_bind_int(st, 1, seqnum);
+        sqlite3_bind_text(st, 2, p->lang, 3, SQLITE_TRANSIENT);
 
         int ec = SQLITE_FAIL;
         for (int i = 0; (ec = sqlite3_step(st)) == SQLITE_ROW; i++) {
-            struct sqlite3_stmt *st2 = NULL;
             definition_t *def = &defs[i];
 
             def->id = sqlite3_column_int(st, 0);
-
-            {
-                const char *sql = "SELECT count(*) FROM jmdict_sense_gloss WHERE sense = ? AND lang = ?";
-                sqlite3_prepare_v2(p->db, sql, -1, &st2, NULL);
-                sqlite3_bind_int(st2, 1, def->id);
-                sqlite3_bind_text(st2, 2, p->lang, 3, SQLITE_TRANSIENT);
-
-                int ec2 = sqlite3_step(st2);
-                if (ec2 == SQLITE_ROW) {
-                    def->ngloss = sqlite3_column_int(st2, 0);
-                } else {
-                    fprintf(stderr, "ERR! Failed to get glossary count\n");
-
-                    goto g_next;
-                }
-
-                sqlite3_finalize(st2);
-                st2 = NULL;
-            }
-
-            def->gloss = calloc((size_t)def->ngloss, sizeof(glossary_t));
-
-            if (def->ngloss > 0) {
-                const char *sql = "SELECT id, type, text FROM jmdict_sense_gloss WHERE sense = ? AND lang = ?";
-                sqlite3_prepare_v2(p->db, sql, -1, &st2, NULL);
-                sqlite3_bind_int(st2, 1, def->id);
-                sqlite3_bind_text(st2, 2, p->lang, 3, SQLITE_TRANSIENT);
-
-                int ec2 = SQLITE_FAIL;
-                for (int ii = 0; (ec2 = sqlite3_step(st2)) == SQLITE_ROW; ii++) {
-                    glossary_t *gloss = &def->gloss[ii];
-
-                    gloss->id = sqlite3_column_int(st2, 0);
-                    const char *type = (const char *)sqlite3_column_text(st2, 1);
-                    if (type != NULL) strcpy(gloss->type, type);
-                    gloss->text = strdup((const char*)sqlite3_column_text(st2, 2));
-                }
-                if (ec2 != SQLITE_DONE) {
-                    fprintf(stderr, "ERR! Failed to parse all glossaries: %i\n", ec2);
-
-                    goto g_next;
-                }
-
-                count++;
-            }
-
-        g_next:
-            if (st2 != NULL) sqlite3_finalize(st2);
+            const char *type = (const char *)sqlite3_column_text(st, 1);
+            if (type != NULL) strcpy(def->type, type);
+            def->text = strdup((const char *)sqlite3_column_text(st, 2));
         }
         if (ec != SQLITE_DONE) {
             fprintf(stderr, "ERR! Failed to parse all definitions: %i\n", ec);
+
+            goto cleanup;
         }
 
         sqlite3_finalize(st);
         st = NULL;
-        ndefs = count;
+    }
+
+    if (p->verbose >= 2) {
+        printf("dtime = %lu\n", time(0) - then);
     }
 
     {
@@ -524,21 +491,23 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
 
         if (ndefs > 0) {
+            int lastid = 0;
             for (int i = 0; i < ndefs; i++) {
                 definition_t *def = &defs[i];
 
-                printf("\t%2i) %s\n", i+1, def->gloss[0].text);
-                for (int ii = 1; ii < def->ngloss; ii++) {
-                    glossary_t *gloss = &def->gloss[ii];
-
-                    printf("\t    %s\n", gloss->text);
+                if (def->id != lastid) {
+                    if (i > 0) putchar('\n');
+                    printf("\t%2i) %s\n", i+1, def->text);
+                } else {
+                    printf("\t    %s\n", def->text);
                 }
-                putchar('\n');
+
+                lastid = def->id;
             }
         }
 
         if (nkanji > 1) {
-            printf("Other forms:\n\t");
+            printf("\nOther forms:\n\t");
             for (int i = 1; i < nkanji; i++) {
                 kanji_t *k = &kanji[i];
 
@@ -590,12 +559,7 @@ cleanup:
         for (int i = 0; i < ndefs; i++) {
             definition_t *def = &defs[i];
 
-            for (int i = 0; i < def->ngloss; i++) {
-                glossary_t *gloss = &def->gloss[i];
-
-                free(gloss->text);
-            }
-            free(def->gloss);
+            free(def->text);
         }
         free(defs);
     }
