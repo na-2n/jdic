@@ -7,6 +7,7 @@ typedef struct {
     int verbose;
     sqlite3 *db;
 
+    char lang[4];
     int page;
     int limit;
 } jdic_t;
