@@ -5,7 +5,6 @@
 
 #include <sqlite3.h>
 #include <expat.h>
-
 #include "util.h"
 #include "jmdict.h"
 
@@ -53,8 +52,48 @@ static void XMLCALL startEl(void *p, const XML_Char *name, const XML_Char **atts
         return;
     }
 
+    struct sqlite3_stmt *st = NULL;
+    if (!strcmp(name, "sense")) {
+        {
+            const char *sql = "INSERT INTO jmdict_sense (seqnum) VALUES (?)";
+            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
+            sqlite3_bind_int(st, 1, d->seqnum);
+
+            int rc = sqlite3_step(st);
+            if (rc != SQLITE_DONE) {
+                fprintf(stderr, "ERR! Failed to insert sense: %i\n" , rc);
+
+                XML_StopParser(d->parser, XML_FALSE);
+                goto cleanup;
+            }
+
+            sqlite3_finalize(st);
+            st = NULL;
+        }
+        {
+            const char *sql = "SELECT last_insert_rowid()";
+            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
+
+            int rc = sqlite3_step(st);
+            if (rc == SQLITE_ROW) {
+                d->sense_id = sqlite3_column_int(st, 0);
+            } else {
+                fprintf(stderr, "ERR! Failed to get last row id: %i\n", rc);
+
+                XML_StopParser(d->parser, XML_FALSE);
+                goto cleanup;
+            }
+
+            sqlite3_finalize(st);
+            st = NULL;
+        }
+    }
+
     d->cur_tag = name;
     d->cur_atts = atts;
+
+cleanup:
+    if (st != NULL) sqlite3_finalize(st);
 }
 
 static void XMLCALL charHandler(void *p, const XML_Char *s, int len)
@@ -197,40 +236,6 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
             int rc = sqlite3_step(st);
             if (rc == SQLITE_ROW) {
                 d->reading_id = sqlite3_column_int(st, 0);
-            } else {
-                fprintf(stderr, "ERR! Failed to get last row id: %i\n", rc);
-
-                XML_StopParser(d->parser, XML_FALSE);
-                goto cleanup;
-            }
-
-            sqlite3_finalize(st);
-            st = NULL;
-        }
-    } else if (!strcmp(name, "sense")) {
-        {
-            const char *sql = "INSERT INTO jmdict_sense (seqnum) VALUES (?)";
-            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-            sqlite3_bind_int(st, 1, d->seqnum);
-
-            int rc = sqlite3_step(st);
-            if (rc != SQLITE_DONE) {
-                fprintf(stderr, "ERR! Failed to insert sense: %i\n" , rc);
-
-                XML_StopParser(d->parser, XML_FALSE);
-                goto cleanup;
-            }
-
-            sqlite3_finalize(st);
-            st = NULL;
-        }
-        {
-            const char *sql = "SELECT last_insert_rowid()";
-            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-
-            int rc = sqlite3_step(st);
-            if (rc == SQLITE_ROW) {
-                d->sense_id = sqlite3_column_int(st, 0);
             } else {
                 fprintf(stderr, "ERR! Failed to get last row id: %i\n", rc);
 
@@ -426,6 +431,7 @@ int jmdict_import(jdic_t *p, const char *fn)
     }
     sqlite3_finalize(st);
     */
+    sqlite3_exec(p->db, "PRAGMA read_uncomitted=true", NULL, NULL, NULL);
 
     sqlite3_prepare_v2(p->db, "BEGIN", -1, &st, NULL);
     if (sqlite3_step(st) != SQLITE_DONE) {
