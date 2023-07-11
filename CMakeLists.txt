@@ -13,7 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS YES)
 
 add_executable(jdic ${JDIC_SOURCE})
 
-target_compile_options(jdic PUBLIC -O2 -Wall -Wconversion -Wfloat-equal -Wredundant-decls)
+target_compile_options(jdic PUBLIC -g -Wall -Wconversion -Wfloat-equal -Wredundant-decls)
 target_include_directories(jdic PUBLIC
     /usr/include
     /usr/local/include
