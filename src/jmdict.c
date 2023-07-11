@@ -88,10 +88,6 @@ static void XMLCALL charHandler(void *p, const XML_Char *s, int len)
 
     //d->cur_val = s;
     //d->cur_val_len = len;
-
-    if (!strcmp(d->cur_tag, "ent_seq")) {
-        d->seqnum = antoi(s, (size_t)len);
-    }
 }
 
 static void XMLCALL endEl(void *p, const XML_Char *name)
@@ -137,6 +133,8 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
                 st = NULL;
             }
         }
+    } else if (!strcmp(name, "ent_seq")) {
+        d->seqnum = antoi(d->cur_val, (size_t)d->cur_val_len);
     } else if (!strcmp(name, "keb")) {
         {
             const char *sql = "INSERT INTO jmdict_kanji (seqnum, text) VALUES (?, ?)";
@@ -232,7 +230,7 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
 
             int rc = sqlite3_step(st);
             if (rc == SQLITE_ROW) {
-                d->sense_id= sqlite3_column_int(st, 0);
+                d->sense_id = sqlite3_column_int(st, 0);
             } else {
                 fprintf(stderr, "ERR! Failed to get last row id: %i\n", rc);
 
@@ -297,7 +295,7 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
 
         const char *sql = "INSERT INTO jmdict_sense_gloss (sense, lang, text, type, gender) VALUES (?, ?, ?, ?, ?)";
         sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-        sqlite3_bind_int(st, 1, d->seqnum);
+        sqlite3_bind_int(st, 1, d->sense_id);
         sqlite3_bind_text(st, 2, lang, (int)strlen(lang), SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 3, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
         if (type != NULL) {
