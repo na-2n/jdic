@@ -457,7 +457,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
     }
 
     if (nkanji > 1) {
-        printf("\nOther forms:\n\t");
+        printf("\n    Other forms:\n\t    ");
         for (int i = 1; i < nkanji; i++) {
             kanji_t *k = &kanji[i];
 
