@@ -134,6 +134,11 @@ int main(int argc, char **argv)
 
     int *seqnums = calloc((size_t)p.limit, sizeof(int));
     int count = -1;
+
+    // TODO change these into iterators that take print_kanji_info as an argument,
+    //      this means we don't have to store seqnums
+    // ALTERNATIVELY
+    //      also combine queries so we don't have to query jmdict_kanji and jmdict_reading twice
     if (search_mode == SEARCH_AUTO) {
         count = jmdict_search_kanji(&p, arg, seqnums);
         if (count <= 0) {
@@ -439,7 +444,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
         if (ec != SQLITE_DONE) {
             fprintf(stderr, "ERR! Failed to parse all definitions: %i\n", ec);
-            goto cleanup;
+            goto d_cleanup;
         }
         if (p->fast < 1 && xrefstr != NULL && xrefid == lastid) {
             printf("\t  See also %s\n", xrefstr);
