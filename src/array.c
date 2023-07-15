@@ -3,20 +3,19 @@
 
 #include "array.h"
 
-array_t * array_new(size_t isize, size_t tsize)
+array_t array_new(size_t isize, size_t tsize)
 {
-    array_t *arr = calloc(1, sizeof(array_t));
-    arr->asize = isize;
-    arr->tsize = tsize;
-    arr->ptr = calloc(isize, tsize);
+    array_t arr = {
+        .tsize = tsize,
+        .asize = isize * tsize,
+        .ptr = calloc(isize, tsize),
+    };
 
     return arr;
 }
 
 int array_check(array_t *arr, size_t nsize)
 {
-    printf("arr->asize = %zu\n", arr->asize);
-    printf("nsize = %zu\n", nsize);
     if (arr->asize < nsize) {
         void *new = realloc(arr->ptr, arr->asize * 2);
         if (new == NULL) {
@@ -30,11 +29,17 @@ int array_check(array_t *arr, size_t nsize)
     return 1;
 }
 
-void array_free(array_t *arr)
+void array_free(array_t *arr, array_free_func f)
 {
-    if (arr != NULL) {
-        if (arr->ptr != NULL) free(arr->ptr);
-        free(arr);
+    if (arr != NULL && arr->ptr != NULL) {
+        if (f != NULL) {
+            for (int i = 0; i < arr->size; i++) {
+                void *loc = arr->ptr + (arr->tsize * (unsigned long)i);
+                f(loc);
+            }
+        }
+
+        free(arr->ptr);
     }
 }
 
