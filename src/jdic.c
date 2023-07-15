@@ -130,7 +130,7 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("Searching for \"%s\"...\n", arg);
+    if (p.verbose >= 1) printf("Searching for \"%s\"...\n", arg);
 
     int *seqnums = calloc((size_t)p.limit, sizeof(int));
     int count = -1;
@@ -171,6 +171,9 @@ int main(int argc, char **argv)
         for (int i = 0; i < count; i++) {
             print_kanji_info(&p, seqnums[i]);
         }
+        if (p.verbose >= 1) printf("Found %i match(es)\n", count);
+    } else {
+        printf("No results found...\n");
     }
 
 cleanup:
@@ -343,12 +346,52 @@ void print_kanji_info(jdic_t *p, int seqnum)
     }
 
     {
-        const char *sql =
-            "SELECT sense, type, text FROM jmdict_sense_gloss "
-            "WHERE seqnum = ? AND lang = ?";
-        sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
-        sqlite3_bind_int(st, 1, seqnum);
-        sqlite3_bind_text(st, 2, p->lang, 3, SQLITE_TRANSIENT);
+        {
+            const char *sql =
+                "SELECT sense, type, text FROM jmdict_sense_gloss "
+                "WHERE seqnum = ? AND lang = ?";
+            sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
+            sqlite3_bind_int(st, 1, seqnum);
+            sqlite3_bind_text(st, 2, p->lang, 3, SQLITE_TRANSIENT);
+        }
+
+        struct sqlite3_stmt *st2 = NULL;
+        struct sqlite3_stmt *st3 = NULL;
+        int xrefid = 0;
+        const char *xrefstr = NULL;
+        if (p->fast < 1) {
+            {
+                const char *sql =
+                    "SELECT sense, group_concat(text, ', ') "
+                    "FROM jmdict_sense_pos WHERE seqnum = ? "
+                    "GROUP BY sense";
+                sqlite3_prepare_v2(p->db, sql, -1, &st2, NULL);
+                sqlite3_bind_int(st2, 1, seqnum);
+            }
+
+            {
+                const char *sql =
+                    "SELECT sense, group_concat(text, ', ') "
+                    "FROM jmdict_sense_xref WHERE seqnum = ? "
+                    "GROUP BY sense";
+                sqlite3_prepare_v2(p->db, sql, -1, &st3, NULL);
+                sqlite3_bind_int(st3, 1, seqnum);
+
+                int ec = sqlite3_step(st3);
+                if (ec != SQLITE_ROW && ec != SQLITE_DONE) {
+                    fprintf(stderr, "ERR! Failed to get xref: %i\n", ec);
+
+                    goto d_cleanup;
+                }
+
+                xrefid = sqlite3_column_int(st3, 0);
+                xrefstr = (const char *)sqlite3_column_text(st3, 1);
+            }
+        }
+
+        if (p->verbose >= 2) {
+            printf("      def1 query time = %llims\n", mstime() - then);
+        }
 
         int lastid = 0;
         int ec = SQLITE_FAIL;
@@ -361,52 +404,31 @@ void print_kanji_info(jdic_t *p, int seqnum)
             if (type != NULL) strcpy(def.type, type);
 
             if (def.id != lastid) {
-                struct sqlite3_stmt *st2 = NULL;
+                if (i > 0) {
+                    if (p->fast < 1 && xrefid == def.id) {
+                        if (xrefstr != NULL) printf("\t  See also %s\n", xrefstr);
+                        xrefid = 0;
+                        xrefstr = NULL;
 
-                if (p->fast < 1 && i > 0) {
-                    {
-                        const char *sql =
-                            "SELECT text FROM jmdict_sense_xref WHERE seqnum = ? AND sense = ?";
-                        sqlite3_prepare_v2(p->db, sql, -1, &st2, NULL);
-                        sqlite3_bind_int(st2, 1, seqnum);
-                        sqlite3_bind_int(st2, 2, def.id);
-
-                        int ec = SQLITE_FAIL;
-                        for (int ii = 0; (ec = sqlite3_step(st2)) == SQLITE_ROW; ii++) {
-                            if (ii > 0) printf(", ");
-                            printf("See also %s", sqlite3_column_text(st2, 0));
+                        int ec2 = sqlite3_step(st3);
+                        if (ec2 == SQLITE_ROW) {
+                            xrefid = sqlite3_column_int(st3, 0);
+                            xrefstr = (const char *)sqlite3_column_text(st3, 1);
+                        } else if (ec2 != SQLITE_DONE) {
+                            fprintf(stderr, "ERR! Failed to get xref: %i\n", ec2);
                         }
-                        if (ec != SQLITE_DONE) {
-                            fprintf(stderr, "ERR! Failed to parse all xrefs: %i\n", ec);
-                        }
-
-                        sqlite3_finalize(st2);
-                        st2 = NULL;
                     }
 
                     putchar('\n');
                 }
 
                 if (p->fast < 1) {
-                    const char *sql =
-                        "SELECT text FROM jmdict_sense_pos WHERE seqnum = ? AND sense = ?";
-                    sqlite3_prepare_v2(p->db, sql, -1, &st2, NULL);
-                    sqlite3_bind_int(st2, 1, seqnum);
-                    sqlite3_bind_int(st2, 2, def.id);
-
-                    putchar('\t');
-                    int ec = SQLITE_FAIL;
-                    for (int ii = 0; (ec = sqlite3_step(st2)) == SQLITE_ROW; ii++) {
-                        if (ii > 0) printf(", ");
-                        printf("%s", sqlite3_column_text(st2, 0));
+                    int ec2 = sqlite3_step(st2);
+                    if (ec2 == SQLITE_ROW) {
+                        printf("\t%s\n", sqlite3_column_text(st2, 1));
+                    } else if (ec2 != SQLITE_DONE) {
+                        fprintf(stderr, "ERR! Failed to get part of speech: %i\n", ec2);
                     }
-                    if (ec != SQLITE_DONE) {
-                        fprintf(stderr, "ERR! Failed to parse all poses: %i\n", ec);
-                    }
-
-                    putchar('\n');
-                    sqlite3_finalize(st2);
-                    st2 = NULL;
                 }
 
                 printf("\t%2i) %s\n", def.id, def.text);
@@ -417,11 +439,16 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
         if (ec != SQLITE_DONE) {
             fprintf(stderr, "ERR! Failed to parse all definitions: %i\n", ec);
-
             goto cleanup;
         }
+        if (p->fast < 1 && xrefstr != NULL && xrefid == lastid) {
+            printf("\t  See also %s\n", xrefstr);
+        }
 
+    d_cleanup:
         sqlite3_finalize(st);
+        if (st2 != NULL) sqlite3_finalize(st2);
+        if (st3 != NULL) sqlite3_finalize(st3);
         st = NULL;
     }
 
