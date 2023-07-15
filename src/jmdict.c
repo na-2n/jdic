@@ -503,6 +503,10 @@ int jmdict_import(jdic_t *p, const char *fn)
     sqlite3_exec(p->db, "CREATE INDEX f_kanji ON jmdict_reading_for (kanji)", NULL, NULL, NULL);
     sqlite3_exec(p->db, "CREATE INDEX g_seqnum ON jmdict_sense_gloss (seqnum)", NULL, NULL, NULL);
     sqlite3_exec(p->db, "CREATE INDEX g_lang ON jmdict_sense_gloss (lang)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX p_seqnum ON jmdict_sense_pos (seqnum)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX p_sense ON jmdict_sense_pos (sense)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX x_seqnum ON jmdict_sense_xref (seqnum)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX x_sense ON jmdict_sense_xref (sense)", NULL, NULL, NULL);
 
 cleanup:
     sqlite3_finalize(st);
