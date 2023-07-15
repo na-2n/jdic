@@ -5,6 +5,7 @@
 
 typedef struct {
     int verbose;
+    int fast;
     sqlite3 *db;
 
     char lang[4];

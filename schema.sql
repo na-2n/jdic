@@ -1,4 +1,4 @@
--- KANJI
+--- KANJI
 
 CREATE TABLE jmdict_kanji (
     id          INTEGER PRIMARY KEY,
@@ -39,13 +39,9 @@ CREATE TABLE jmdict_reading_for (
 
 -- SENSE
 
-CREATE TABLE jmdict_sense (
-    id          INTEGER PRIMARY KEY,
-    seqnum      INTEGER NOT NULL
-);
-
 CREATE TABLE jmdict_sense_gloss (
     id          INTEGER PRIMARY KEY,
+    seqnum      INTEGER NOT NULL,
     sense       INTEGER NOT NULL,
     lang        TINYTEXT NOT NULL,
     -- TODO might change the following two to enums
@@ -53,6 +49,20 @@ CREATE TABLE jmdict_sense_gloss (
     type        TINYTEXT,
     text        TEXT NOT NULL,
     FOREIGN KEY(sense) REFERENCES jmdict_sense(id)
+);
+
+CREATE TABLE jmdict_sense_pos (
+    id          INTEGER PRIMARY KEY,
+    seqnum      INTEGER NOT NULL,
+    sense       INTEGER NOT NULL,
+    text        TEXT NOT NULL
+);
+
+CREATE TABLE jmdict_sense_xref (
+    id          INTEGER PRIMARY KEY,
+    seqnum      INTEGER NOT NULL,
+    sense       INTEGER NOT NULL,
+    text        TINYTEXT NOT NULL
 );
 
 -- TODO implement the following

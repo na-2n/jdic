@@ -23,7 +23,8 @@ typedef struct {
     int seqnum;
     int kanji_id;
     int reading_id;
-    int sense_id;
+
+    int sensei;
 
     const XML_Char *cur_tag;
     const XML_Char **cur_atts;
@@ -52,48 +53,12 @@ static void XMLCALL startEl(void *p, const XML_Char *name, const XML_Char **atts
         return;
     }
 
-    struct sqlite3_stmt *st = NULL;
     if (!strcmp(name, "sense")) {
-        {
-            const char *sql = "INSERT INTO jmdict_sense (seqnum) VALUES (?)";
-            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-            sqlite3_bind_int(st, 1, d->seqnum);
-
-            int rc = sqlite3_step(st);
-            if (rc != SQLITE_DONE) {
-                fprintf(stderr, "ERR! Failed to insert sense: %i\n" , rc);
-
-                XML_StopParser(d->parser, XML_FALSE);
-                goto cleanup;
-            }
-
-            sqlite3_finalize(st);
-            st = NULL;
-        }
-        {
-            const char *sql = "SELECT last_insert_rowid()";
-            sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-
-            int rc = sqlite3_step(st);
-            if (rc == SQLITE_ROW) {
-                d->sense_id = sqlite3_column_int(st, 0);
-            } else {
-                fprintf(stderr, "ERR! Failed to get last row id: %i\n", rc);
-
-                XML_StopParser(d->parser, XML_FALSE);
-                goto cleanup;
-            }
-
-            sqlite3_finalize(st);
-            st = NULL;
-        }
+        d->sensei++;
     }
 
     d->cur_tag = name;
     d->cur_atts = atts;
-
-cleanup:
-    if (st != NULL) sqlite3_finalize(st);
 }
 
 static void XMLCALL charHandler(void *p, const XML_Char *s, int len)
@@ -124,9 +89,6 @@ static void XMLCALL charHandler(void *p, const XML_Char *s, int len)
     }
     memcpy(d->cur_val+d->cur_val_len, s, (size_t)len);
     d->cur_val_len += len;
-
-    //d->cur_val = s;
-    //d->cur_val_len = len;
 }
 
 static void XMLCALL endEl(void *p, const XML_Char *name)
@@ -142,7 +104,7 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
         // these are technically not needed since they *should* be overwritten before being used again
         d->kanji_id = 0;
         d->reading_id = 0;
-        d->sense_id = 0;
+        d->sensei = 0;
         d->count++;
 
         if (d->seqnum % COMMIT_FREQ == 0) {
@@ -209,8 +171,6 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
             sqlite3_finalize(st);
             st = NULL;
         }
-
-        //XML_StopParser(d->parser, XML_FALSE);
     } else if (!strcmp(name, "reb")) {
         {
             const char *sql = "INSERT INTO jmdict_reading (seqnum, text) VALUES (?, ?)";
@@ -298,25 +258,66 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
             }
         }
 
-        const char *sql = "INSERT INTO jmdict_sense_gloss (sense, lang, text, type, gender) VALUES (?, ?, ?, ?, ?)";
+        const char *sql =
+            "INSERT INTO jmdict_sense_gloss (seqnum, sense, lang, text, type, gender) "
+            "VALUES (?, ?, ?, ?, ?, ?)";
         sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
-        sqlite3_bind_int(st, 1, d->sense_id);
-        sqlite3_bind_text(st, 2, lang, (int)strlen(lang), SQLITE_TRANSIENT);
-        sqlite3_bind_text(st, 3, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 1, d->seqnum);
+        sqlite3_bind_int(st, 2, d->sensei);
+        sqlite3_bind_text(st, 3, lang, (int)strlen(lang), SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 4, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
         if (type != NULL) {
-            sqlite3_bind_text(st, 4, type, (int)strlen(type), SQLITE_TRANSIENT);
-        } else {
-            sqlite3_bind_null(st, 4);
-        }
-        if (gender != NULL) {
-            sqlite3_bind_text(st, 5, gender, (int)strlen(gender), SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 5, type, (int)strlen(type), SQLITE_TRANSIENT);
         } else {
             sqlite3_bind_null(st, 5);
+        }
+        if (gender != NULL) {
+            sqlite3_bind_text(st, 6, gender, (int)strlen(gender), SQLITE_TRANSIENT);
+        } else {
+            sqlite3_bind_null(st, 6);
         }
 
         int rc = sqlite3_step(st);
         if (rc != SQLITE_DONE) {
             fprintf(stderr, "ERR! Failed to insert glossary: %i\n" , rc);
+
+            XML_StopParser(d->parser, XML_FALSE);
+            goto cleanup;
+        }
+
+        sqlite3_finalize(st);
+        st = NULL;
+    } else if (!strcmp(name, "pos")) {
+        const char *sql =
+            "INSERT INTO jmdict_sense_pos (seqnum, sense, text) "
+            "VALUES (?, ?, ?)";
+        sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
+        sqlite3_bind_int(st, 1, d->seqnum);
+        sqlite3_bind_int(st, 2, d->sensei);
+        sqlite3_bind_text(st, 3, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
+
+        int rc = sqlite3_step(st);
+        if (rc != SQLITE_DONE) {
+            fprintf(stderr, "ERR! Failed to insert pos: %i\n" , rc);
+
+            XML_StopParser(d->parser, XML_FALSE);
+            goto cleanup;
+        }
+
+        sqlite3_finalize(st);
+        st = NULL;
+    } else if (!strcmp(name, "xref")) {
+        const char *sql =
+            "INSERT INTO jmdict_sense_xref (seqnum, sense, text) "
+            "VALUES (?, ?, ?)";
+        sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
+        sqlite3_bind_int(st, 1, d->seqnum);
+        sqlite3_bind_int(st, 2, d->sensei);
+        sqlite3_bind_text(st, 3, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
+
+        int rc = sqlite3_step(st);
+        if (rc != SQLITE_DONE) {
+            fprintf(stderr, "ERR! Failed to insert xref: %i\n" , rc);
 
             XML_StopParser(d->parser, XML_FALSE);
             goto cleanup;
@@ -378,6 +379,8 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
 
         sqlite3_finalize(st);
         st = NULL;
+    } else if (!strcmp(name, "s_inf")) {
+
     }
 
 cleanup:
@@ -490,6 +493,16 @@ int jmdict_import(jdic_t *p, const char *fn)
     }
 
     printf("Imported %i entries in %s\n", userdata.count, tstr);
+
+    printf("Creating indices...\n");
+    sqlite3_exec(p->db, "CREATE INDEX k_seqnum ON jmdict_kanji (seqnum)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX k_text ON jmdict_kanji (text)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX r_seqnum ON jmdict_reading (seqnum)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX r_id ON jmdict_reading (id)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX r_text ON jmdict_reaidng (text)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX f_kanji ON jmdict_reading_for (kanji)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX g_seqnum ON jmdict_sense_gloss (seqnum)", NULL, NULL, NULL);
+    sqlite3_exec(p->db, "CREATE INDEX g_lang ON jmdict_sense_gloss (lang)", NULL, NULL, NULL);
 
 cleanup:
     sqlite3_finalize(st);
