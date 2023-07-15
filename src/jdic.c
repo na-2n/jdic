@@ -486,13 +486,12 @@ cleanup:
         for (int i = 0; i < nkanji; i++) {
             kanji_t *k = &kanji[i];
 
-            free(k->kanji);
+            if (k->kanji != NULL) free(k->kanji);
 
-            for (int i = 0; i < k->ntags; i++) {
-                free(k->tags[i]);
+            if (k->tags != NULL) {
+                for (int i = 0; i < k->ntags; i++) free(k->tags[i]);
+                free(k->tags);
             }
-            free(k->tags);
-
         }
         free(kanji);
     };
