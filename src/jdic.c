@@ -130,7 +130,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (p.verbose >= 1) printf("Searching for \"%s\"...\n", arg);
+    if (p.verbose) printf("Searching for \"%s\"...\n", arg);
 
     int *seqnums = calloc((size_t)p.limit, sizeof(int));
     int count = -1;
@@ -176,9 +176,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < count; i++) {
             print_kanji_info(&p, seqnums[i]);
         }
-        if (p.verbose >= 1) printf("Found %i match(es)\n", count);
-    } else {
-        printf("No results found...\n");
+        if (p.verbose) printf("Found %i match(es)\n", count);
     }
 
 cleanup:
@@ -198,8 +196,7 @@ typedef struct {
 
 typedef struct {
     char *kanji;
-    int ntags;
-    char **tags;
+    char *tags;
     char *reading;
     bool true_reading;
 } kanji_t;
@@ -305,16 +302,18 @@ void print_kanji_info(jdic_t *p, int seqnum)
         kanji = calloc((size_t)nkanji, sizeof(kanji_t));
 
         const char *sql =
-            "SELECT k.text, r.text, r.truereading "
+            "SELECT k.text, r.text, r.truereading, group_concat(t.text, ', ') "
             "FROM ("
                 "SELECT * FROM jmdict_kanji WHERE seqnum = ?"
             ") k "
+                "LEFT JOIN jmdict_kanji_tag t ON t.kanji = k.id "
                 "LEFT JOIN jmdict_reading_for f ON f.kanji = k.id "
                 "LEFT JOIN jmdict_reading r ON r.id = f.reading OR ("
                     "r.seqnum = k.seqnum AND NOT EXISTS("
                         "SELECT * FROM jmdict_reading_for WHERE kanji = k.id"
                     ")"
-                ")";
+                ") "
+            "GROUP BY k.id, r.id";
 
         sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
         sqlite3_bind_int(st, 1, seqnum);
@@ -326,6 +325,8 @@ void print_kanji_info(jdic_t *p, int seqnum)
             k->kanji = strdup((const char *)sqlite3_column_text(st, 0));
             k->reading = strdup((const char *)sqlite3_column_text(st, 1));
             k->true_reading = sqlite3_column_int(st, 2);
+            const char *tags = (const char *)sqlite3_column_text(st, 3);
+            if (tags != NULL) k->tags = strdup(tags);
 
             if (i == 0) {
                 if (k->true_reading) {
@@ -365,6 +366,8 @@ void print_kanji_info(jdic_t *p, int seqnum)
         int xrefid = 0;
         const char *xrefstr = NULL;
         if (p->fast < 1) {
+            // FIXME both of these queries are REALLY slow for some reason...
+            //       Could possibly combine them into a single query?
             {
                 const char *sql =
                     "SELECT sense, group_concat(text, ', ') "
@@ -395,7 +398,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
 
         if (p->verbose >= 2) {
-            printf("      def1 query time = %llims\n", mstime() - then);
+            printf("       def query time = %llims\n", mstime() - then);
         }
 
         int lastid = 0;
@@ -411,7 +414,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
             if (def.id != lastid) {
                 if (i > 0) {
                     if (p->fast < 1 && xrefid == def.id) {
-                        if (xrefstr != NULL) printf("\t  See also %s\n", xrefstr);
+                        if (xrefstr != NULL) printf("\tSee also %s\n", xrefstr);
                         xrefid = 0;
                         xrefstr = NULL;
 
@@ -430,15 +433,15 @@ void print_kanji_info(jdic_t *p, int seqnum)
                 if (p->fast < 1) {
                     int ec2 = sqlite3_step(st2);
                     if (ec2 == SQLITE_ROW) {
-                        printf("\t%s\n", sqlite3_column_text(st2, 1));
+                        printf("    %s\n", sqlite3_column_text(st2, 1));
                     } else if (ec2 != SQLITE_DONE) {
                         fprintf(stderr, "ERR! Failed to get part of speech: %i\n", ec2);
                     }
                 }
 
-                printf("\t%2i) %s\n", def.id, def.text);
+                printf("    %2i) %s\n", def.id, def.text);
             } else {
-                printf("\t    %s\n", def.text);
+                printf("        %s\n", def.text);
             }
             lastid = def.id;
         }
@@ -462,7 +465,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
     }
 
     if (nkanji > 1) {
-        printf("\n    Other forms:\n\t    ");
+        printf("\n    Other forms:\n        ");
         for (int i = 1; i < nkanji; i++) {
             kanji_t *k = &kanji[i];
 
@@ -478,6 +481,23 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
         putchar('\n');
     }
+
+    if (nkanji > 0) {
+        bool first = true;
+        for (int i = 0; i < nkanji; i++) {
+            kanji_t *k = &kanji[i];
+
+            if (k->tags != NULL) {
+
+                if (first) {
+                    printf("    Notes\n");
+                    first = false;
+                }
+                printf("        %s: %s\n", k->kanji, k->tags);
+            }
+        }
+    }
+
     putchar('\n');
 
 cleanup:
@@ -487,11 +507,7 @@ cleanup:
             kanji_t *k = &kanji[i];
 
             if (k->kanji != NULL) free(k->kanji);
-
-            if (k->tags != NULL) {
-                for (int i = 0; i < k->ntags; i++) free(k->tags[i]);
-                free(k->tags);
-            }
+            if (k->tags != NULL) free(k->tags);
         }
         free(kanji);
     };
