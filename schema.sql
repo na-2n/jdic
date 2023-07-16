@@ -65,6 +65,13 @@ CREATE TABLE jmdict_sense_xref (
     text        TINYTEXT NOT NULL
 );
 
+CREATE TABLE jmdict_sense_info (
+    id          INTEGER PRIMARY KEY,
+    seqnum      INTEGER NOT NULL,
+    sense       INTEGER NOT NULL,
+    text        TEXT NOT NULL
+);
+
 -- TODO implement the following
 --CREATE TABLE jmdict_sense_example (
 --    id          INTEGER PRIMARY KEY,

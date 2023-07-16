@@ -192,6 +192,7 @@ typedef struct {
     char lang[4];
     char type[5];
     char *text;
+    char *info;
 } definition_t;
 
 typedef struct {
@@ -346,7 +347,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
         st = NULL;
     }
 
-    if (p->verbose >= 2) {
+    if (p->verbose >= 3) {
         printf("     kanji query time = %llims\n", mstime() - then);
         then = mstime();
     }
@@ -354,8 +355,10 @@ void print_kanji_info(jdic_t *p, int seqnum)
     {
         {
             const char *sql =
-                "SELECT sense, type, text FROM jmdict_sense_gloss "
-                "WHERE seqnum = ? AND lang = ?";
+                "SELECT g.sense, g.type, g.text, group_concat(i.text, ', ')"
+                "FROM (SELECT * FROM jmdict_sense_gloss WHERE seqnum = ? AND lang = ?) g "
+                    "LEFT JOIN jmdict_sense_info i ON i.seqnum = g.seqnum AND i.sense = g.sense "
+                "GROUP BY g.id, g.sense";
             sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
             sqlite3_bind_int(st, 1, seqnum);
             sqlite3_bind_text(st, 2, p->lang, 3, SQLITE_TRANSIENT);
@@ -365,6 +368,8 @@ void print_kanji_info(jdic_t *p, int seqnum)
         struct sqlite3_stmt *st3 = NULL;
         int xrefid = 0;
         const char *xrefstr = NULL;
+        char *lastinfo = NULL;
+
         if (p->fast < 1) {
             // FIXME both of these queries are REALLY slow for some reason...
             //       Could possibly combine them into a single query?
@@ -397,7 +402,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
             }
         }
 
-        if (p->verbose >= 2) {
+        if (p->verbose >= 3) {
             printf("       def query time = %llims\n", mstime() - then);
         }
 
@@ -407,14 +412,21 @@ void print_kanji_info(jdic_t *p, int seqnum)
             definition_t def = {
                 .id = sqlite3_column_int(st, 0),
                 .text = (char *)sqlite3_column_text(st, 2),
+                .info = (char *)sqlite3_column_text(st, 3),
             };
             const char *type = (const char *)sqlite3_column_text(st, 1);
             if (type != NULL) strcpy(def.type, type);
 
+            if (lastinfo != NULL) free(lastinfo);
+            if (def.info != NULL) lastinfo = strdup(def.info);
+            else lastinfo = NULL;
+
             if (def.id != lastid) {
                 if (i > 0) {
+                    if (lastinfo != NULL) printf("       %s.\n", lastinfo);
+
                     if (p->fast < 1 && xrefid == def.id) {
-                        if (xrefstr != NULL) printf("\tSee also %s\n", xrefstr);
+                        if (xrefstr != NULL) printf("       See also %s.\n", xrefstr);
                         xrefid = 0;
                         xrefstr = NULL;
 
@@ -449,6 +461,11 @@ void print_kanji_info(jdic_t *p, int seqnum)
             fprintf(stderr, "ERR! Failed to parse all definitions: %i\n", ec);
             goto d_cleanup;
         }
+        if (lastinfo != NULL) {
+            printf("       %s.\n", lastinfo);
+            free(lastinfo);
+        }
+
         if (p->fast < 1 && xrefstr != NULL && xrefid == lastid) {
             printf("\t  See also %s\n", xrefstr);
         }
@@ -460,7 +477,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
         st = NULL;
     }
 
-    if (p->verbose >= 2) {
+    if (p->verbose >= 3) {
         printf("definition query time = %llims\n", mstime() - then);
     }
 
@@ -488,11 +505,11 @@ void print_kanji_info(jdic_t *p, int seqnum)
             kanji_t *k = &kanji[i];
 
             if (k->tags != NULL) {
-
                 if (first) {
-                    printf("    Notes\n");
+                    printf("\n    Notes\n");
                     first = false;
                 }
+
                 printf("        %s: %s\n", k->kanji, k->tags);
             }
         }

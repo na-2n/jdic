@@ -325,6 +325,25 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
 
         sqlite3_finalize(st);
         st = NULL;
+    } else if (!strcmp(name, "s_inf")) {
+        const char *sql =
+            "INSERT INTO jmdict_sense_info (seqnum, sense, text) "
+            "VALUES (?, ?, ?)";
+        sqlite3_prepare_v2(d->db, sql, -1, &st, NULL);
+        sqlite3_bind_int(st, 1, d->seqnum);
+        sqlite3_bind_int(st, 2, d->sensei);
+        sqlite3_bind_text(st, 3, d->cur_val, d->cur_val_len, SQLITE_TRANSIENT);
+
+        int rc = sqlite3_step(st);
+        if (rc != SQLITE_DONE) {
+            fprintf(stderr, "ERR! Failed to insert s_inf: %i\n" , rc);
+
+            XML_StopParser(d->parser, XML_FALSE);
+            goto cleanup;
+        }
+
+        sqlite3_finalize(st);
+        st = NULL;
     } else if (!strcmp(name, "re_restr")) {
         int kanji_id;
 
@@ -379,8 +398,6 @@ static void XMLCALL endEl(void *p, const XML_Char *name)
 
         sqlite3_finalize(st);
         st = NULL;
-    } else if (!strcmp(name, "s_inf")) {
-
     }
 
 cleanup:
