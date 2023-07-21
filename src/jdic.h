@@ -3,6 +3,10 @@
 
 #include <sqlite3.h>
 
+#ifndef FAST
+#define FAST false
+#endif
+
 typedef struct {
     int verbose;
     int fast;

@@ -47,6 +47,9 @@ int main(int argc, char **argv)
                 p.verbose++;
                 break;
             case 'f':
+#if !FAST
+                if (p.fast < 1) printf("Not compiled with FAST=true, this option might not do much!\n");
+#endif
                 p.fast++;
                 break;
             case 'k':
@@ -193,6 +196,7 @@ typedef struct {
     char type[5];
     char *text;
     char *info;
+    char *misc;
 } definition_t;
 
 typedef struct {
@@ -355,9 +359,17 @@ void print_kanji_info(jdic_t *p, int seqnum)
     {
         {
             const char *sql =
-                "SELECT g.sense, g.type, g.text, group_concat(i.text, ', ')"
+#if !FAST
+                "SELECT g.sense, g.type, g.text, group_concat(i.text, ', '), group_concat(m.text, ', ') "
+#else
+                "SELECT g.sense, g.type, g.text, group_concat(i.text, ', ') "
+#endif
                 "FROM (SELECT * FROM jmdict_sense_gloss WHERE seqnum = ? AND lang = ?) g "
                     "LEFT JOIN jmdict_sense_info i ON i.seqnum = g.seqnum AND i.sense = g.sense "
+#if !FAST
+                    // FIXME for some reason this join slows down the query by a LOT (~50ms, 2x slower)
+                    "LEFT JOIN jmdict_sense_misc m ON m.seqnum = g.seqnum AND m.sense = g.sense "
+#endif
                 "GROUP BY g.id, g.sense";
             sqlite3_prepare_v2(p->db, sql, -1, &st, NULL);
             sqlite3_bind_int(st, 1, seqnum);
@@ -413,6 +425,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
                 .id = sqlite3_column_int(st, 0),
                 .text = (char *)sqlite3_column_text(st, 2),
                 .info = (char *)sqlite3_column_text(st, 3),
+                .misc = (char *)sqlite3_column_text(st, 4),
             };
             const char *type = (const char *)sqlite3_column_text(st, 1);
             if (type != NULL) strcpy(def.type, type);
@@ -425,8 +438,8 @@ void print_kanji_info(jdic_t *p, int seqnum)
                 if (i > 0) {
                     if (lastinfo != NULL) printf("       %s.\n", lastinfo);
 
-                    if (p->fast < 1 && xrefid == def.id) {
-                        if (xrefstr != NULL) printf("       See also %s.\n", xrefstr);
+                    if (p->fast < 1 && xrefid == lastid) {
+                        if (xrefstr != NULL) printf("       See also %s\n", xrefstr);
                         xrefid = 0;
                         xrefstr = NULL;
 
@@ -445,11 +458,16 @@ void print_kanji_info(jdic_t *p, int seqnum)
                 if (p->fast < 1) {
                     int ec2 = sqlite3_step(st2);
                     if (ec2 == SQLITE_ROW) {
-                        printf("    %s\n", sqlite3_column_text(st2, 1));
+                        printf("    %s.", sqlite3_column_text(st2, 1));
                     } else if (ec2 != SQLITE_DONE) {
                         fprintf(stderr, "ERR! Failed to get part of speech: %i\n", ec2);
                     }
+                } else {
+                    printf("    ");
                 }
+
+                if (def.misc != NULL) printf(" %s", def.misc);
+                putchar('\n');
 
                 printf("    %2i) %s\n", def.id, def.text);
             } else {
@@ -467,7 +485,7 @@ void print_kanji_info(jdic_t *p, int seqnum)
         }
 
         if (p->fast < 1 && xrefstr != NULL && xrefid == lastid) {
-            printf("\t  See also %s\n", xrefstr);
+            printf("       See also %s\n", xrefstr);
         }
 
     d_cleanup:
