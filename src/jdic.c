@@ -542,6 +542,7 @@ cleanup:
             kanji_t *k = &kanji[i];
 
             if (k->kanji != NULL) free(k->kanji);
+            if (k->reading != NULL) free(k->reading);
             if (k->tags != NULL) free(k->tags);
         }
         free(kanji);
